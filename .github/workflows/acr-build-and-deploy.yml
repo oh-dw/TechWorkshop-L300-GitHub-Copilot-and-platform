@@ -8,6 +8,13 @@ on:
       - '.github/workflows/acr-build-and-deploy.yml'
       - 'infra/**'
       - 'azure.yaml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/acr-build-and-deploy.yml'
+      - 'infra/**'
+      - 'azure.yaml'
   workflow_dispatch: {}
 
 permissions:
