@@ -1,0 +1,25 @@
+name: zavastore
+metadata:
+  template: zava-dev-appservice-container
+infra:
+  provider: bicep
+  # azd expects a folder for bicep and automatically looks for main.bicep inside it
+  path: infra
+  parameters:
+    namePrefix: zavastore
+    env: dev
+    location: westus3
+services:
+  web:
+    project: src
+    language: dotnet
+    host: appservice
+  
+hooks:
+  postprovision:
+    shell: pwsh
+    run: |
+      $deployment = az deployment group show --name $(azd env get-value AZURE_DEPLOYMENT_NAME) --resource-group $(azd env get-value AZURE_RESOURCE_GROUP) --output json | ConvertFrom-Json
+      echo "ACR login server: $($deployment.properties.outputs.acrLoginServer.value)"
+      echo "Web app host: $($deployment.properties.outputs.webAppHostName.value)"
+      echo "Foundry endpoint: $($deployment.properties.outputs.foundryEndpoint.value)"

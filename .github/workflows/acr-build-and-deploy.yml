@@ -1,0 +1,60 @@
+name: Build and Deploy Container to Web App
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/acr-build-and-deploy.yml'
+      - 'infra/**'
+      - 'azure.yaml'
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZ_RESOURCE_GROUP }}
+  ACR_NAME: ${{ vars.AZ_ACR_NAME }}
+  WEBAPP_NAME: ${{ vars.AZ_WEBAPP_NAME }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image with ACR Tasks
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            set -e
+            if [ -z "$RESOURCE_GROUP" ] || [ -z "$ACR_NAME" ] || [ -z "$WEBAPP_NAME" ]; then
+              echo "RESOURCE_GROUP, ACR_NAME, and WEBAPP_NAME must be set as repository variables (vars)." >&2
+              exit 1
+            fi
+
+            ACR_LOGIN_SERVER=$(az acr show -n "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query loginServer -o tsv)
+            IMAGE_TAG="zavastore:${GITHUB_SHA}"
+
+            echo "Building image $ACR_LOGIN_SERVER/$IMAGE_TAG via az acr build..."
+            az acr build -r "$ACR_NAME" -t "$IMAGE_TAG" -f src/Dockerfile src
+
+            echo "Configuring Web App container image..."
+            az webapp config container set \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$WEBAPP_NAME" \
+              --docker-custom-image-name "$ACR_LOGIN_SERVER/$IMAGE_TAG" \
+              --docker-registry-server-url "https://$ACR_LOGIN_SERVER"
+
+            echo "Restarting Web App..."
+            az webapp restart --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
