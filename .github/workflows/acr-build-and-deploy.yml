@@ -1,0 +1,65 @@
+name: Build and Deploy Container to Web App
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/acr-build-and-deploy.yml'
+      - 'infra/**'
+      - 'azure.yaml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/acr-build-and-deploy.yml'
+      - 'infra/**'
+      - 'azure.yaml'
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZ_RESOURCE_GROUP }}
+  ACR_NAME: ${{ vars.AZURE_CONTAINER_REGISTRY_NAME }}
+  WEBAPP_NAME: ${{ vars.AZURE_APP_SERVICE_NAME }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push image with ACR Tasks
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            set -e
+            if [ -z "$RESOURCE_GROUP" ] || [ -z "$ACR_NAME" ] || [ -z "$WEBAPP_NAME" ]; then
+              echo "AZ_RESOURCE_GROUP, AZURE_CONTAINER_REGISTRY_NAME, and AZURE_APP_SERVICE_NAME must be set as repository variables (vars)." >&2
+              exit 1
+            fi
+
+            ACR_LOGIN_SERVER=$(az acr show -n "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query loginServer -o tsv)
+            IMAGE_TAG="zavastore:${GITHUB_SHA}"
+
+            echo "Building image $ACR_LOGIN_SERVER/$IMAGE_TAG via az acr build..."
+            az acr build -r "$ACR_NAME" -t "$IMAGE_TAG" -f src/Dockerfile src
+
+            echo "Configuring Web App container image..."
+            az webapp config container set \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$WEBAPP_NAME" \
+              --docker-custom-image-name "$ACR_LOGIN_SERVER/$IMAGE_TAG" \
+              --docker-registry-server-url "https://$ACR_LOGIN_SERVER"
+
+            echo "Restarting Web App..."
+            az webapp restart --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
